@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/letclone.svg)](https://crates.io/crates/letclone)
 [![Documentation](https://docs.rs/letclone/badge.svg)](https://docs.rs/letclone)
-[![License](https://img.shields.io/crates/l/letclone.svg)](https://github.com/grounzer/letclone/blob/main/LICENSE)
+[![License](https://img.shields.io/crates/l/letclone.svg)](https://github.com/GrounzerLiu/letclone/blob/main/LICENSE)
 
 A procedural macro for convenient variable cloning in Rust.
 
