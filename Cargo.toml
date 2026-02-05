@@ -1,0 +1,22 @@
+[package]
+name = "letclone"
+version = "0.1.0"
+edition = "2024"
+authors = ["GrounzerLiu"]
+description = "A procedural macro for convenient variable cloning in Rust"
+license = "Apache-2.0"
+repository = "https://github.com/GrounzerLiu/letclone"
+readme = "README.md"
+keywords = ["macro", "clone", "proc-macro", "utility"]
+categories = ["development-tools::procedural-macro-helpers"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+proc-macro2 = "1.0"
+
+[dev-dependencies]
+trybuild = "1.0.115"
