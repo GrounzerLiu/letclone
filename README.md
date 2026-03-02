@@ -18,7 +18,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-letclone = "0.1.0"
+letclone = "0.2.0"
 ```
 
 ## Usage
