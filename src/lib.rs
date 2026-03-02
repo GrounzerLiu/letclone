@@ -8,6 +8,9 @@
 //! cloning variables into new bindings. Instead of writing verbose `let` statements
 //! with `.clone()` calls, you can use the concise `clone!` macro.
 //!
+//! The macro is especially useful when working with closures that need to capture
+//! cloned values, as it reduces boilerplate code significantly.
+//!
 //! ## Examples
 //!
 //! ### Basic Usage
@@ -58,9 +61,26 @@
 //! // let a = a.clone();
 //! // let b = b.clone();
 //! ```
+//!
+//! ### Usage in Closures
+//!
+//! ```rust
+//! use letclone::clone;
+//!
+//! let name = String::from("Alice");
+//! let scores = vec![85, 90, 95];
+//!
+//! let closure = {
+//!     clone!(name, scores);
+//!     move || {
+//!         println!("Name: {}, Scores: {:?}", name, scores);
+//!     }
+//! };
+//! ```
 
 use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream};
+use syn::spanned::Spanned;
 use syn::Token;
 
 /// Represents a cloneable expression with optional `mut` modifier
@@ -77,7 +97,7 @@ impl Parse for CloneExpr {
             None
         };
         let inner: syn::Expr = input.parse()
-            .map_err(|e| syn::Error::new(e.span(), "expected a valid expression: field access (a.b), method call (a.method()), or path (var)"))?;
+            .map_err(|e| syn::Error::new(e.span(), "expected a valid expression: field access (a.b), tuple index access (a.0), method call (a.method()), or path (var)"))?;
         Ok(CloneExpr { mutability, inner })
     }
 }
@@ -100,13 +120,15 @@ impl ToTokens for CloneExpr {
                 });
             }
             syn::Expr::Field(syn::ExprField {
+                base,
                 member: syn::Member::Unnamed(index),
                 ..
             }) => {
-                panic!(
-                    "clone! macro does not support tuple index access (e.g., a.0), please use named fields: {:?}",
-                    index.index
-                );
+                let index_num = index.index;
+                let ident = syn::Ident::new(&format!("field_{}", index_num), index.span());
+                tokens.extend(quote! {
+                    #ident = #base.#index.clone();
+                });
             }
             syn::Expr::MethodCall(expr_method_call) => {
                 let method = &expr_method_call.method;
@@ -122,7 +144,7 @@ impl ToTokens for CloneExpr {
             }
             _ => {
                 panic!(
-                    "clone! macro does not support this expression type. Supported types: field access (a.b), method call (a.method()), path (var). Got: {:?}",
+                    "clone! macro does not support this expression type. Supported types: field access (a.b), tuple index access (a.0), method call (a.method()), path (var). Got: {:?}",
                     inner.to_token_stream()
                 );
             }
@@ -139,8 +161,9 @@ impl Parse for CloneExprList {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut exprs = Vec::new();
         while !input.is_empty() {
-            let expr: CloneExpr = input.parse()
-                .map_err(|e| syn::Error::new(e.span(), format!("failed to parse clone expression: {}", e)))?;
+            let expr: CloneExpr = input.parse().map_err(|e| {
+                syn::Error::new(e.span(), format!("failed to parse clone expression: {}", e))
+            })?;
             exprs.push(expr);
             if input.peek(Token![,]) {
                 let _comma: Token![,] = input.parse()?;
@@ -149,7 +172,10 @@ impl Parse for CloneExprList {
             }
         }
         if exprs.is_empty() {
-            return Err(syn::Error::new(input.span(), "clone! macro requires at least one expression"));
+            return Err(syn::Error::new(
+                input.span(),
+                "clone! macro requires at least one expression",
+            ));
         }
         Ok(CloneExprList { exprs })
     }
@@ -163,19 +189,40 @@ impl ToTokens for CloneExprList {
     }
 }
 
-
 /// Generates `let var = expr.clone();` statements for one or more expressions
 ///
 /// # Supported expression types
 /// - Field access: `clone!(obj.field)` -> `let field = obj.field.clone();`
+/// - Nested field access: `clone!(a.b.c)` -> `let c = a.b.c.clone();`
+/// - Tuple index: `clone!(tuple.0)` -> `let field_0 = tuple.0.clone();`
+/// - Nested tuple index: `clone!(obj.tuple.0)` -> `let field_0 = obj.tuple.0.clone();`
 /// - Method call: `clone!(obj.method())` -> `let method = obj.method().clone();`
+/// - Nested method call: `clone!(a.b.method())` -> `let method = a.b.method().clone();`
 /// - Path/variable: `clone!(var)` -> `let var = var.clone();`
 ///
 /// # Using `mut` modifier
 /// - `clone!(mut obj.field)` -> `let mut field = obj.field.clone();`
+/// - `clone!(mut tuple.0)` -> `let mut field_0 = tuple.0.clone();`
+/// - `clone!(mut a.b.c)` -> `let mut c = a.b.c.clone();`
 ///
 /// # Multiple expressions
 /// - `clone!(a, b.field, mut c)` -> generates multiple let statements
+///
+/// # Usage in closures
+/// The macro is particularly useful for cloning values before moving them into closures:
+/// ```
+/// use letclone::clone;
+///
+/// let name = String::from("Alice");
+/// let scores = vec![85, 90, 95];
+///
+/// let closure = {
+///     clone!(name, scores);
+///     move || {
+///         println!("Name: {}, Scores: {:?}", name, scores);
+///     }
+/// };
+/// ```
 #[proc_macro]
 pub fn clone(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let expr_list = syn::parse_macro_input!(input as CloneExprList);
