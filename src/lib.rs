@@ -11,6 +11,17 @@
 //! The macro is especially useful when working with closures that need to capture
 //! cloned values, as it reduces boilerplate code significantly.
 //!
+//! ## Notes
+//!
+//! `clone!` transparently unwraps `syn::Expr::Group` and continues processing the
+//! inner expression. This matters mostly for tokens produced by macro expansion,
+//! where `Group` is an implementation detail rather than a user-written Rust
+//! expression.
+//!
+//! This is different from a source-level parenthesized expression such as `(a)`
+//! or `(a + b)`, which parses as `syn::Expr::Paren` and is not treated as a
+//! supported clone target.
+//!
 //! ## Examples
 //!
 //! ### Basic Usage
@@ -78,15 +89,15 @@
 //! };
 //! ```
 
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::Token;
+use syn::{Expr, ExprGroup, Token};
 
 /// Represents a cloneable expression with optional `mut` modifier
 struct CloneExpr {
     mutability: Option<Token![mut]>,
-    inner: syn::Expr,
+    inner: Expr,
 }
 
 impl Parse for CloneExpr {
@@ -96,7 +107,7 @@ impl Parse for CloneExpr {
         } else {
             None
         };
-        let inner: syn::Expr = input.parse()
+        let inner: Expr = input.parse()
             .map_err(|e| syn::Error::new(e.span(), "expected a valid expression: field access (a.b), tuple index access (a.0), method call (a.method()), or path (var)"))?;
         Ok(CloneExpr { mutability, inner })
     }
@@ -109,45 +120,98 @@ impl ToTokens for CloneExpr {
             tokens.extend(quote! { #m });
         }
         let inner = &self.inner;
-        match &self.inner {
-            syn::Expr::Field(syn::ExprField {
-                base,
-                member: syn::Member::Named(field_name),
-                ..
-            }) => {
-                tokens.extend(quote! {
-                    #field_name = #base.#field_name.clone();
-                });
-            }
-            syn::Expr::Field(syn::ExprField {
-                base,
-                member: syn::Member::Unnamed(index),
-                ..
-            }) => {
-                let index_num = index.index;
-                let ident = syn::Ident::new(&format!("field_{}", index_num), index.span());
-                tokens.extend(quote! {
-                    #ident = #base.#index.clone();
-                });
-            }
-            syn::Expr::MethodCall(expr_method_call) => {
-                let method = &expr_method_call.method;
-                tokens.extend(quote! {
-                    #method = #inner.clone();
-                });
-            }
-            syn::Expr::Path(syn::ExprPath { path, .. }) => {
-                let ident = &path.segments.last().unwrap().ident;
-                tokens.extend(quote! {
-                    #ident = #inner.clone();
-                });
-            }
-            _ => {
-                panic!(
-                    "clone! macro does not support this expression type. Supported types: field access (a.b), tuple index access (a.0), method call (a.method()), path (var). Got: {:?}",
-                    inner.to_token_stream()
-                );
-            }
+        extend(inner, tokens);
+    }
+}
+
+fn expr_variant_description(expr: &Expr) -> &'static str {
+    match expr {
+        Expr::Array(_) => "array expression",
+        Expr::Assign(_) => "assignment expression",
+        Expr::Async(_) => "async block",
+        Expr::Await(_) => "await expression",
+        Expr::Binary(_) => "binary expression",
+        Expr::Block(_) => "block expression",
+        Expr::Break(_) => "break expression",
+        Expr::Call(_) => "function call expression",
+        Expr::Cast(_) => "cast expression",
+        Expr::Closure(_) => "closure expression",
+        Expr::Const(_) => "const block",
+        Expr::Continue(_) => "continue expression",
+        Expr::Field(_) => "field access expression",
+        Expr::ForLoop(_) => "for loop expression",
+        Expr::Group(_) => "grouped expression",
+        Expr::If(_) => "if expression",
+        Expr::Index(_) => "index expression",
+        Expr::Infer(_) => "inferred expression",
+        Expr::Let(_) => "let expression",
+        Expr::Lit(_) => "literal expression",
+        Expr::Loop(_) => "loop expression",
+        Expr::Macro(_) => "macro expression",
+        Expr::Match(_) => "match expression",
+        Expr::MethodCall(_) => "method call expression",
+        Expr::Paren(_) => "parenthesized expression",
+        Expr::Path(_) => "path expression",
+        Expr::Range(_) => "range expression",
+        Expr::RawAddr(_) => "raw address expression",
+        Expr::Reference(_) => "reference expression",
+        Expr::Repeat(_) => "array repeat expression",
+        Expr::Return(_) => "return expression",
+        Expr::Struct(_) => "struct literal expression",
+        Expr::Try(_) => "try expression",
+        Expr::TryBlock(_) => "try block",
+        Expr::Tuple(_) => "tuple expression",
+        Expr::Unary(_) => "unary expression",
+        Expr::Unsafe(_) => "unsafe block",
+        Expr::Verbatim(_) => "verbatim expression",
+        Expr::While(_) => "while expression",
+        Expr::Yield(_) => "yield expression",
+        _ => "expression",
+    }
+}
+
+fn extend(expr: &Expr, tokens: &mut proc_macro2::TokenStream) {
+    match expr {
+        Expr::Field(syn::ExprField {
+            base,
+            member: syn::Member::Named(field_name),
+            ..
+        }) => {
+            tokens.extend(quote! {
+                #field_name = #base.#field_name.clone();
+            });
+        }
+        Expr::Field(syn::ExprField {
+            base,
+            member: syn::Member::Unnamed(index),
+            ..
+        }) => {
+            let index_num = index.index;
+            let ident = syn::Ident::new(&format!("field_{}", index_num), index.span());
+            tokens.extend(quote! {
+                #ident = #base.#index.clone();
+            });
+        }
+        Expr::MethodCall(expr_method_call) => {
+            let method = &expr_method_call.method;
+            tokens.extend(quote! {
+                #method = #expr.clone();
+            });
+        }
+        Expr::Path(syn::ExprPath { path, .. }) => {
+            let ident = &path.segments.last().unwrap().ident;
+            tokens.extend(quote! {
+                #ident = #expr.clone();
+            });
+        }
+        Expr::Group(ExprGroup { expr, .. }) => {
+            extend(&expr, tokens);
+        }
+        _ => {
+            panic!(
+                "clone! macro does not support {}. Supported forms: field access (`a.b`), tuple index access (`a.0`), method call (`a.method()`), or path (`var`).",
+                expr_variant_description(expr)
+            );
         }
     }
 }

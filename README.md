@@ -325,6 +325,14 @@ The `clone!` macro supports a specific set of expression types for automatic var
 - Array indexing: `clone!(arr[0])`
 - Complex expressions that cannot derive a variable name automatically
 
+## Notes
+
+`clone!` transparently unwraps grouped expressions produced during macro
+expansion and continues processing the inner expression.
+
+This is different from source-level parenthesized expressions such as `(a)` or
+`(a + b)`, which are not supported clone targets.
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
